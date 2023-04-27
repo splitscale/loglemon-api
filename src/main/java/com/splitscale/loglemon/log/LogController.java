@@ -1,37 +1,56 @@
 package com.splitscale.loglemon.log;
 
-import java.time.Duration;
-import java.util.Random;
+import java.io.IOException;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 
-import org.springframework.http.MediaType;
-import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.socket.CloseStatus;
+import org.springframework.web.socket.TextMessage;
+import org.springframework.web.socket.WebSocketSession;
+import org.springframework.web.socket.config.annotation.EnableWebSocket;
+import org.springframework.web.socket.config.annotation.WebSocketConfigurer;
+import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry;
+import org.springframework.web.socket.handler.AbstractWebSocketHandler;
 
-import reactor.core.publisher.Flux;
-import reactor.core.publisher.Mono;
-import reactor.core.publisher.Sinks;
-
+@EnableWebSocket
 @RestController
-@RequestMapping("/api/v1/logger")
-public class LogController {
-  private final Sinks.Many<String> sink;
+@RequestMapping("/logs")
+public class LogController implements WebSocketConfigurer {
 
-  public LogController() {
-    this.sink = Sinks.many().multicast().onBackpressureBuffer();
-  }
-
-  @GetMapping(value = "/stream", produces = MediaType.APPLICATION_STREAM_JSON_VALUE)
-  public Flux<String> streamData() {
-    return sink.asFlux();
-  }
+  private final List<WebSocketSession> sessions = new CopyOnWriteArrayList<>();
 
   @PostMapping
-  public Mono<Void> logMessage(@RequestBody String message) {
-    System.out.println(message);
-    sink.tryEmitNext(message);
-    return Mono.empty();
+  public void log(@RequestBody String message) throws IOException {
+    for (WebSocketSession session : sessions) {
+      session.sendMessage(new TextMessage(message));
+    }
   }
+
+  @Override
+  public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
+    registry.addHandler(new LogWebSocketHandler(), "/logs/ws");
+  }
+
+  private class LogWebSocketHandler extends AbstractWebSocketHandler {
+
+    @Override
+    public void afterConnectionEstablished(WebSocketSession session) throws Exception {
+      sessions.add(session);
+    }
+
+    @Override
+    public void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
+      // not used
+    }
+
+    @Override
+    public void afterConnectionClosed(WebSocketSession session, CloseStatus closeStatus) throws Exception {
+      sessions.remove(session);
+    }
+  }
+
 }
